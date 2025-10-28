@@ -1,0 +1,538 @@
+\documentclass{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{polski}
+
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{geometry}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb}
+
+% wykresy, tabele
+\usepackage{pgfplots}
+\usepackage{pgfplotstable}
+\pgfplotsset{compat=1.18}
+
+%marginesy
+\geometry{margin=2.2cm}
+
+% Kolory do wykresów
+\definecolor{cBlue}{RGB}{33,113,181}
+\definecolor{cOrange}{RGB}{230,85,13}
+\definecolor{cGreen}{RGB}{49,163,84}
+\definecolor{cPurple}{RGB}{117,107,177}
+\definecolor{cBrown}{RGB}{166,97,26}
+\definecolor{cPink}{RGB}{231,41,138}
+
+%Style wykresów
+\pgfplotsset{
+	compat=1.18,
+	myaxis/.style={
+		width=0.9\linewidth,
+		height=7cm,
+		xlabel={$n$},
+		ylabel={czas [ns]},
+		grid=both,
+		legend pos=north west,
+		legend cell align=left,
+		title style={yshift=6pt}
+	}
+}
+
+
+% cpp
+\lstset{
+	language=C++,
+	basicstyle=\ttfamily\small,
+	keywordstyle=\bfseries,
+	commentstyle=\itshape,
+	numbers=left,
+	numberstyle=\tiny,
+	stepnumber=1,
+	numbersep=8pt,
+	showstringspaces=false,
+	breaklines=true,
+	frame=single,
+	tabsize=2
+}
+
+\title{Analiza porównawcza algorytmów sortowania}
+
+
+\begin{document}
+	\maketitle
+	
+	\section{Wprowadzenie}
+	W niniejszym sprawozdaniu przedstawiono implementację i analizę sześciu algorytmów sortowania:
+	
+	\begin{enumerate}
+		\item \texttt{INSERTION\_SORT},
+		\item \texttt{INSERTION\_SORT\_DOUBLE},
+		\item \texttt{MERGE\_SORT},
+		\item \texttt{MERGE\_SORT3},
+		\item \texttt{HEAP\_SORT} 
+		\item \texttt{HEAP\_SORT\_TERNARY}.
+	\end{enumerate}
+	
+	
+	
+	Dla tablic o różnych rozmiarach zmierzono czas działania oraz zliczano liczbę porównań i przypisań.
+	Wykresy w skali log-log potwierdzają teoretyczne rzędy złożoności - algorytmy $O(n^2)$ szybko przegrywają z wariantami $O(n\log n)$ już dla średnich $n$.	 
+	Dla każdego algorytmu mierzono czas wykonania oraz liczby porównań i przypisań, a następnie wizualizowano wyniki w postaci tabel i wykresów.
+	
+	\section{Metodyka pomiarów}
+	Pomiary wykonano w języku C++ z użyciem \texttt{std::chrono::high\_resolution\_clock} i zapisem wyników do pliku \texttt{wyniki.csv}. Metodyka zapewnia sprawiedliwe porównanie algorytmów:
+	
+	\paragraph{Rozmiary i powtórzenia.}
+	Dla każdego $n \in \{100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000\}$ wykonano $R=10$ niezależnych prób dla każdego algorytmu. Dla każdej próby generowano nową tablicę \texttt{baza} wypełnioną losowymi liczbami wygenerowanymi przez funkcję \texttt{fill\_random}.
+	
+	\paragraph{Losowanie danych.}
+	Elementy tablicy losowano z przedziału liczb całkowitych $[-10^6,10^6]$.
+	
+	
+	\paragraph{Pomiar czasu.}
+	Czas mierzono za pomocą \texttt{t1 = high\_resolution\_clock::now()} i \texttt{t2 = ...::now()}, a różnicę przeliczano na nanosekundy przez
+	\texttt{duration\_cast<nanoseconds>(t2 - t1).count()}. Dla każdego $(n,r)$ zapisywano czasy wszystkich sześciu algorytmów, a następnie uśredniano po $R$ próbach.
+	
+	\paragraph{Liczniki operacji (struktura \texttt{Stats}).}
+	W algorytmach zliczano:
+	\begin{itemize}
+		\item \texttt{por} — liczbę porównań wartości danych (np. \texttt{A[j] > x}, \texttt{L[i] \textless= R[j]}),
+		\item \texttt{przyp} — liczbę przypisań przenoszących wartości danych (np. \texttt{A[l] = L[i]} lub zamiany).
+	\end{itemize}
+	Dla każdego algorytmu uśredniano \texttt{por} i \texttt{przyp} po $R$ próbach.
+	
+	\paragraph{Format wyników.}
+	Plik \texttt{wyniki.csv} zawiera kolumny:
+	\texttt{n}, a dla każdego algorytmu (INS, INSD, M2, M3, H2, H3) trójkę: \texttt{\_czas\_ns}, \texttt{\_por}, \texttt{\_przyp}.
+	Do uśrednienia 10 wyników danego algorytmu dla ustalonego n wykorzystano \texttt{llround}.
+	
+	\paragraph{TLDR;}
+	\begin{itemize}
+		\item Każde wywołanie programu ma swój własny seed losowany na podstawie czasu systemowego\\ \texttt{ std::srand(std::time(NULL));},
+		\item Na podstawie tego użyto \texttt{ unsigned int base\_seed = std::rand();} i otrzymano \texttt{base\_seed}, czyli prawie już pierwszy używalny seed do generowania,
+		\item Prawie, ponieważ \texttt{base\_seed} będzie deterministycznie modyfikowany dla ustalonego $n \in$ \texttt{Ns} w każdej z $R$ prób. Użyto — jak widać poniżej — na żaden sposób niewyróżniającego się wzoru $(n,r)$ podczas wywołania funkcji \texttt{fill\_random}.
+		\begin{lstlisting}
+			for (int r = 0; r < R; ++r) {
+				int* baza = new int[n];
+				fill_random(baza, n, base_seed + n*37 + r);
+		\end{lstlisting}
+		\item Warto dodać, że zastosowano \emph{funkcję lambda} \texttt{avg}, która po każdej iteracji pętli zewnętrznej iterującej po $n \in$ \texttt{Ns}, czyli po $R$ prób dla ustalonego $n$ przyjmowała sumy: czasów [ns], powtórzeń oraz przypisań jako \texttt{long double x} i miała bardzo proste zadanie - uśrednić wynik za pomocą \texttt{llround}:
+		\begin{lstlisting}
+			auto avg = [R](long double x)
+			{ return (long long) llround(x / R); }; 
+			\end{lstlisting}
+		Została użyta podczas \emph{printowania} do \texttt{ofstream out("wyniki.csv", ios::trunc);} wiersza wyników dla $n$:
+		\begin{lstlisting}
+			out << n << ","
+		<< avg(sum_tINS)  << "," << avg(sum_cINS)  << "," << avg(sum_aINS)  << "," ...
+		\end{lstlisting}
+	\end{itemize}
+	
+	
+	\section{Najciekawsze fragmenty kodu z wyjaśnieniami}
+	
+	\subsection*{INSERTION\_SORT\_DOUBLE — wstawianie podwójne}
+	
+	\begin{lstlisting}
+		//INSERTION SORT modyfikacja
+		void INSERTION_SORT_DOUBLE(int A[], int n, Stats& stats)
+		{
+			if (n < 2) return;
+			
+			//sortowanie pierwszej pary
+			stats.porownania++;
+			if (A[0] > A[1]) {
+				int x = A[0];
+				A[0] = A[1];  stats.przypisania++;
+				A[1] = x;     stats.przypisania++;
+			}
+			
+			//kolejne pary
+			for (int i = 2; i < n; i += 2) {
+				//gdy nie ma pelnej pary
+				if (i + 1 >= n) {
+					int x = A[i];
+					int j = i - 1;
+					while (j >= 0) {
+						stats.porownania++;
+						if (A[j] > x) {
+							A[j + 1] = A[j]; stats.przypisania++;
+							j--;
+						} else break;
+					}
+					A[j + 1] = x; stats.przypisania++;
+					break;
+				}
+				
+				//nastepna para tak, by a <= b
+				int a = A[i];     
+				int b = A[i + 1];
+				stats.porownania++;
+				if (a > b) {
+					int x = a; 
+					a = b;
+					b = x;
+				}
+				
+				//wstaw wiekszy (b) - przesuwamy o 2
+				int j = i - 1;
+				while (j >= 0) {
+					stats.porownania++;
+					if (A[j] > b) {
+						A[j + 2] = A[j]; stats.przypisania++;
+						j--;
+					} else break;
+				}
+				A[j + 2] = b; stats.przypisania++;
+				
+				//wstaw mniejszy (a) - przesuwamy o 1
+				while (j >= 0) {
+					stats.porownania++;
+					if (A[j] > a) {
+						A[j + 1] = A[j]; stats.przypisania++;
+						j--;
+					} else break;
+				}
+				A[j + 1] = a; stats.przypisania++;
+			}
+		}
+	\end{lstlisting}
+	
+	\paragraph{Mechanika działania.}
+	Algorytm działa podobnie do klasycznego wstawiania, ale zamiast pojedynczego elementu wstawia \emph{parę} elementów $(a,b)$ tak, aby $a \le b$. Najpierw wstawiany jest element większy, przesuwany o dwa pozycje, a następnie mniejszy o jedną.  
+	Dzięki temu redukuje się liczbę przesunięć, ponieważ wewnętrzna pętla wykorzystuje częściowo przesunięte dane z poprzedniego wstawienia.
+	
+	\paragraph{Uzasadnienie poprawności.}
+	Dla każdej iteracji z indeksem $i$ (rozpatrywanej pary):
+	\[
+	A[0 \dots i-1] \text{ jest posortowane niemalejąco.}
+	\]
+	Po wstawieniu pary $(a,b)$, gdzie $a\le b$, niezmiennik zostaje zachowany, ponieważ:
+	1. Wstawienie $b$ nie narusza porządku w lewym fragmencie (zachodzi $A[j]\le b$),
+	2. Następnie $a$ jest wstawiane w dokładne miejsce, gdzie $A[j]\le a \le A[j+1]$.
+	Indukcyjnie dla wszystkich $i$ mamy, że po każdej iteracji fragment $A[0\dots i+1]$ jest posortowany.
+	
+	
+	\subsection*{MERGE\_SORT3}
+	
+	\begin{lstlisting}
+		//MERGE_SORT modyfikacja
+		void MERGE_SORT3(int A[], int p, int k, Stats& stats)
+		{
+			if (p >= k) return;
+			int len = k - p + 1;
+			int t1 = p + (len/3) - 1;
+			int t2 = p + (2*len/3) - 1;
+			
+			// korekta granic
+			if (t1 < p) t1 = p;
+			if (t2 < t1 + 1) t2 = t1 + 1;
+			if (t2 > k - 1) t2 = k - 1;
+			
+			MERGE_SORT3(A, p,    t1, stats);
+			MERGE_SORT3(A, t1+1, t2, stats);
+			MERGE_SORT3(A, t2+1, k,  stats);
+			
+			MERGE(A, p,   t1, t2, stats);
+			MERGE(A, p,   t2, k,  stats);
+		}
+	\end{lstlisting}
+	
+	\paragraph{Mechanika działania.}
+	Zamiast dzielić tablicę na dwie połowy, algorytm dzieli ją na trzy części o zbliżonej długości:
+	\[
+	[p,\,t_1],\ [t_1{+}1,\,t_2],\ [t_2{+}1,\,k].
+	\]
+	Każdy fragment jest sortowany rekurencyjnie, a następnie wyniki są łączone dwuetapowo (pierwsze scalanie łączy 1. i 2. część, drugie — wynik z 3. częścią).
+	
+	\paragraph{Uzasadnienie poprawności.}
+	
+	\begin{itemize}
+		\item \textbf{Funkcja \texttt{MERGE}.} \\
+		Funkcja \texttt{MERGE} scala dwa posortowane fragmenty tablicy w jeden większy, zachowując porządek niemalejący. 
+		Porównuje elementy z lewej i prawej części, zawsze wybierając mniejszy i dopisując go do wyniku. 
+		Dzięki temu po zakończeniu działania cały fragment $A[p..k]$ jest posortowany.
+		
+		\item \textbf{Algorytm \texttt{MERGE\_SORT3}.} \\
+		Algorytm dzieli tablicę na trzy części, z których każda jest następnie sortowana rekurencyjnie.  
+		Gdy wszystkie trzy fragmenty są już posortowane, następują dwa kolejne scalenia: 
+		najpierw łączenie pierwszej i drugiej części, a następnie połączenie powstałego wyniku z trzecią częścią.  
+		Ponieważ każda operacja \texttt{MERGE} zachowuje porządek, po dwóch scaleniach otrzymujemy posortowany fragment $A[p..k]$.  
+		Po zakończeniu wszystkich wywołań rekurencji cała tablica $A$ jest uporządkowana niemalejąco.
+	\end{itemize}
+	
+	
+	
+	\subsection*{HEAP\_SORT\_TERNARY}
+	
+	\begin{lstlisting}
+		//HEAP SORT modyfikacja
+		void heapify_ternary(int A[], int n, int i, Stats& stats)
+		{
+			int c1 = 3*i + 1;
+			int c2 = 3*i + 2;
+			int c3 = 3*i + 3;
+			int largest = i;
+			
+			if (c1 < n) { stats.porownania++; if (A[c1] > A[largest]) largest = c1; }
+			if (c2 < n) { stats.porownania++; if (A[c2] > A[largest]) largest = c2; }
+			if (c3 < n) { stats.porownania++; if (A[c3] > A[largest]) largest = c3; }
+			
+			if (largest != i) {
+				swap_count(A[i], A[largest], stats);
+				heapify_ternary(A, n, largest, stats);
+			}
+		}
+	\end{lstlisting}
+	
+	\paragraph{Mechanika działania.}
+	Każdy węzeł ma do trzech dzieci $(3i+1, 3i+2, 3i+3)$.  
+	Funkcja \texttt{heapify\_ternary} utrzymuje własność kopca: element w indeksie $i$ jest nie mniejszy od swoich dzieci. W fazie \emph{build--heap} kopiec jest budowany od dołu, a następnie sortowanie polega na wielokrotnym przenoszeniu elementu maksymalnego na koniec tablicy.
+	
+	\paragraph{Uzasadnienie poprawności.}
+	
+	\begin{itemize}
+		\item \textbf{Funkcja \texttt{heapify\_ternary} (lokalnie w poddrzewie).} \\
+		Funkcja \texttt{heapify\_ternary(i)} dba o to, aby element w węźle $i$ był większy (lub równy) od swoich dzieci. 
+		Jeśli któreś z dzieci jest większe, elementy zostają zamienione miejscami, a procedura wywoływana jest rekurencyjnie dla tego dziecka. 
+		Po zakończeniu działania całe poddrzewo o korzeniu $i$ spełnia własność kopca maksymalnego – rodzic nie jest mniejszy od żadnego ze swoich potomków.
+		
+		\item \textbf{Algorytm \texttt{HEAP\_SORT\_TERNARY} (całość).} \\
+		W pierwszej fazie budowany jest kopiec, dzięki czemu największy element znajduje się na początku tablicy. 
+		Następnie w każdej iteracji największy element (z korzenia) zamieniany jest z ostatnim nieposortowanym, po czym wywoływana jest funkcja \texttt{heapify\_ternary}, 
+		aby przywrócić strukturę kopca w pozostałej części tablicy. 
+		W ten sposób z każdą iteracją rośnie posortowany fragment na końcu tablicy, a reszta pozostaje kopcem. 
+		Po zakończeniu wszystkich kroków cała tablica jest posortowana w porządku rosnącym.
+	\end{itemize}
+	
+	
+	
+	\section{Wyniki pomiarów}
+	\centering
+	\subsection{Tabela (czas w ns)}
+	\pgfplotstabletypeset[
+	col sep=comma,
+	string type,
+	columns={n,INS_czas_ns,INSD_czas_ns,M2_czas_ns,M3_czas_ns,H2_czas_ns,H3_czas_ns},
+	columns/n/.style={column name=$n$},
+	columns/INS_czas_ns/.style={column name=INS},
+	columns/INSD_czas_ns/.style={column name=INSD},
+	columns/M2_czas_ns/.style={column name=M2},
+	columns/M3_czas_ns/.style={column name=M3},
+	columns/H2_czas_ns/.style={column name=H2},
+	columns/H3_czas_ns/.style={column name=H3},
+	every head row/.style={before row=\hline,after row=\hline},
+	every last row/.style={after row=\hline},
+	]{wyniki.csv}
+	
+	\subsection{Wykresy czasu}
+	
+	% 1) INSERTION vs INSERTION_DOUBLE, log-log
+	\begin{figure}[H]
+		\centering
+		\begin{tikzpicture}
+			\begin{axis}[myaxis, xmode=log,ymode=log, title={Czas: INSERTION vs INSERTION\_DOUBLE}]
+				\addplot+[line width=1pt, color=cBlue,   mark=*,       mark size=2.5pt]
+				table[x=n, y=INS_czas_ns,  col sep=comma]{wyniki.csv};
+				\addlegendentry{INS}
+				
+				\addplot+[line width=1pt, color=cOrange, mark=square*, mark size=2.2pt]
+				table[x=n, y=INSD_czas_ns, col sep=comma]{wyniki.csv};
+				\addlegendentry{INSD}
+				
+				\addplot+[line width=1pt, color=black, mark=none, domain=100:100000]
+				{1.5*x^2};
+				\addlegendentry{$f(x)=1.5 \cdot x^2$}
+				
+				\addplot+[line width=1pt, color=black, mark=none, domain=100:100000]
+				{0.5*x^2};
+				\addlegendentry{$g(x)=0.5 \cdot x^2$}
+			\end{axis}
+		\end{tikzpicture}
+		\caption{Porównanie czasu: INSERTION i INSERTION\_DOUBLE w \emph{log--log} z odniesieniami}
+	\end{figure}
+	
+	\begin{figure}[H]
+		\centering
+		\begin{tikzpicture}
+			\begin{axis}[myaxis, xmode=linear,ymode=linear, title={Czas: INSERTION vs INSERTION\_DOUBLE}]
+				\addplot+[line width=1pt, color=cBlue,   mark=*,       mark size=2.5pt]
+				table[x=n, y=INS_czas_ns,  col sep=comma]{wyniki.csv};
+				\addlegendentry{INS}
+				
+				\addplot+[line width=1pt, color=cOrange, mark=square*, mark size=2.2pt]
+				table[x=n, y=INSD_czas_ns, col sep=comma]{wyniki.csv};
+				\addlegendentry{INSD}
+				
+				\addplot+[line width=1pt, color=black, mark=none, domain=100:100000]
+				{0.5*x^2};
+				\addlegendentry{$f(x)=0.5 \cdot x^2$}
+				\addplot+[line width=1pt, color=black, mark=none, domain=100:100000]
+				{x^2};
+				\addlegendentry{$g(x)=x^2$}
+			\end{axis}
+		\end{tikzpicture}
+		\caption{Porównanie czasu: INSERTION i INSERTION\_DOUBLE w \emph{lin--lin} z odniesieniami}
+	\end{figure}
+	
+	%2) MERGE_SORT vs MERGE_SORT3
+	\begin{figure}[H]
+		\centering
+		\begin{tikzpicture}
+			\begin{axis}[myaxis, xmode=log,ymode=log, title={Czas: MERGE\_SORT vs MERGE\_SORT3}]
+				\addplot+[line width=1pt, color=cGreen,  mark=triangle*, mark size=2.6pt]
+				table[x=n, y=M2_czas_ns, col sep=comma]{wyniki.csv};
+				\addlegendentry{M2}
+				
+				\addplot+[line width=1pt, color=cPurple, mark=*,        mark size=2.5pt]
+				table[x=n, y=M3_czas_ns, col sep=comma]{wyniki.csv};
+				\addlegendentry{M3}
+				
+				\addplot+[line width=1pt, color=black, mark=none, domain=100:100000]
+				{50*x*ln(x)};
+				\addlegendentry{$f(x)=50\cdot x \log x$}
+			\end{axis}
+		\end{tikzpicture}
+		\caption{Porównanie czasu: MERGE\_SORT vs MERGE\_SORT3 w \emph{log--log} z odniesieniami.}
+	\end{figure}
+	
+	\begin{figure}[H]
+		\centering
+		\begin{tikzpicture}
+			\begin{axis}[myaxis, xmode=linear,ymode=linear, title={Czas: MERGE\_SORT vs MERGE\_SORT3}]
+				\addplot+[line width=1pt, color=cGreen,  mark=triangle*, mark size=2.6pt]
+				table[x=n, y=M2_czas_ns, col sep=comma]{wyniki.csv};
+				\addlegendentry{M2}
+				
+				\addplot+[line width=1pt, color=cPurple, mark=*,        mark size=2.5pt]
+				table[x=n, y=M3_czas_ns, col sep=comma]{wyniki.csv};
+				\addplot+[line width=1pt, color=black, mark=none, domain=100:100000]
+				{50*x*ln(x)};
+				\addlegendentry{$f(x)=50\cdot x \log x$}
+			\end{axis}
+		\end{tikzpicture}
+		\caption{Porównanie czasu: MERGE\_SORT vs MERGE\_SORT3 w \emph{lin--lin} z odniesieniami.}
+	\end{figure}
+	
+	%3) HEAP: binarny vs ternarny
+	\begin{figure}[H]
+		\centering
+		\begin{tikzpicture}
+			\begin{axis}[myaxis, xmode=log,ymode=log, title={Czas: HEAP binarny vs HEAP ternarny}]
+				\addplot+[line width=1pt, color=cBrown, mark=diamond*, mark size=2.6pt]
+				table[x=n, y=H2_czas_ns, col sep=comma]{wyniki.csv};
+				\addlegendentry{H2}
+				
+				\addplot+[line width=1pt, color=cPink,  mark=star,     mark size=2.6pt]
+				table[x=n, y=H3_czas_ns, col sep=comma]{wyniki.csv};
+				\addlegendentry{H3}
+				
+				\addplot+[line width=1pt, color=black, mark=none, domain=100:100000]
+				{x^2};
+				\addlegendentry{$f(x)=x^2$}
+				\addplot+[line width=1pt, color=black, mark=none, domain=100:100000]
+				{15*x*ln(x)};
+				\addlegendentry{$g(x)=15 \cdot x\log x$}
+			\end{axis}
+		\end{tikzpicture}
+		\caption{Porównanie czasu: HEAP\_SORT binarny vs ternarny \emph{log--log} z odniesieniami.}
+	\end{figure}
+	\begin{figure}[H]
+		\centering
+		\begin{tikzpicture}
+			\begin{axis}[myaxis, xmode=linear,ymode=linear, title={Czas: HEAP binarny vs HEAP ternarny}]
+				\addplot+[line width=1pt, color=cBrown, mark=diamond*, mark size=2.6pt]
+				table[x=n, y=H2_czas_ns, col sep=comma]{wyniki.csv};
+				\addlegendentry{H2}
+				
+				\addplot+[line width=1pt, color=cPink,  mark=star,     mark size=2.6pt]
+				table[x=n, y=H3_czas_ns, col sep=comma]{wyniki.csv};
+				\addlegendentry{H3}
+				
+				\addplot+[line width=1pt, color=black, mark=none, domain=100:100000, samples=50]
+				{25*x*ln(x)};
+				\addlegendentry{$f(x)=25\cdot x\log x$}
+				
+				\addplot+[line width=1pt, color=black, mark=none, domain=100:100000, samples=50]
+				{20*x*ln(x)};
+				\addlegendentry{$g(x)=20 \cdot x\log x$}
+			\end{axis}
+		\end{tikzpicture}
+		\caption{Porównanie czasu: HEAP\_SORT binarny vs ternarny w \emph{lin--lin} z odniesieniami}
+	\end{figure}
+	
+	
+	%4) Zbiorczy wykres dla wszystkich 6 algorytmów
+	\begin{figure}[H]
+		\centering
+		\begin{tikzpicture}
+			\begin{loglogaxis}[myaxis, xmode=log,ymode=log, title={Czas wykonania algorytmów sortowania (wszystkie)}]
+				\addplot+[line width=1pt, color=cBlue,   mark=*,        mark size=2.5pt]
+				table[x=n, y=INS_czas_ns,  col sep=comma]{wyniki.csv}; \addlegendentry{INS}
+				\addplot+[line width=1pt, color=cOrange, mark=square*,  mark size=2.2pt]
+				table[x=n, y=INSD_czas_ns, col sep=comma]{wyniki.csv}; \addlegendentry{INSD}
+				\addplot+[line width=1pt, color=cGreen,  mark=triangle*, mark size=2.6pt]
+				table[x=n, y=M2_czas_ns, col sep=comma]{wyniki.csv};   \addlegendentry{M2}
+				\addplot+[line width=1pt, color=cPurple, mark=*,        mark size=2.5pt]
+				table[x=n, y=M3_czas_ns, col sep=comma]{wyniki.csv};   \addlegendentry{M3}
+				\addplot+[line width=1pt, color=cBrown,  mark=diamond*, mark size=2.6pt]
+				table[x=n, y=H2_czas_ns, col sep=comma]{wyniki.csv};   \addlegendentry{H2}
+				\addplot+[line width=1pt, color=cPink,   mark=star,     mark size=2.6pt]
+				table[x=n, y=H3_czas_ns, col sep=comma]{wyniki.csv};   \addlegendentry{H3}
+			\end{loglogaxis}
+		\end{tikzpicture}
+		\caption{Porównanie czasu działania dla wszystkich algorytmów \emph{log--log}.}
+	\end{figure}
+	
+	\subsection{Wykresy liczby porównań i przypisań}
+	
+	%porównania
+	\begin{figure}[H]
+		\centering
+		\begin{tikzpicture}
+			\begin{loglogaxis}[myaxis, xmode=log,ymode=log, ylabel={liczba porównań}, title={Porównanie: liczba porównań (wszystkie algorytmy)}]
+				\addplot+[color=cBlue,   mark=*]        table[x=n, y=INS_por,  col sep=comma]{wyniki.csv}; \addlegendentry{INS}
+				\addplot+[color=cOrange, mark=square*]  table[x=n, y=INSD_por, col sep=comma]{wyniki.csv}; \addlegendentry{INSD}
+				\addplot+[color=cGreen,  mark=triangle*]table[x=n, y=M2_por,   col sep=comma]{wyniki.csv}; \addlegendentry{M2}
+				\addplot+[color=cPurple, mark=diamond*] table[x=n, y=M3_por,   col sep=comma]{wyniki.csv}; \addlegendentry{M3}
+				\addplot+[color=cBrown,  mark=star]     table[x=n, y=H2_por,   col sep=comma]{wyniki.csv}; \addlegendentry{H2}
+				\addplot+[color=cPink,   mark=x]        table[x=n, y=H3_por,   col sep=comma]{wyniki.csv}; \addlegendentry{H3}
+			\end{loglogaxis}
+		\end{tikzpicture}
+		\caption{Liczba porównań w funkcji rozmiaru danych.}
+	\end{figure}
+	
+	%przypisania
+	\begin{figure}[H]
+		\centering
+		\begin{tikzpicture}
+			\begin{loglogaxis}[myaxis, xmode=log,ymode=log, ylabel={liczba przypisań}, title={Porównanie: liczba przypisań (wszystkie algorytmy)}]
+				\addplot+[color=cBlue,   mark=*]        table[x=n, y=INS_przyp,  col sep=comma]{wyniki.csv}; \addlegendentry{INS}
+				\addplot+[color=cOrange, mark=square*]  table[x=n, y=INSD_przyp, col sep=comma]{wyniki.csv}; \addlegendentry{INSD}
+				\addplot+[color=cGreen,  mark=triangle*]table[x=n, y=M2_przyp,   col sep=comma]{wyniki.csv}; \addlegendentry{M2}
+				\addplot+[color=cPurple, mark=diamond*] table[x=n, y=M3_przyp,   col sep=comma]{wyniki.csv}; \addlegendentry{M3}
+				\addplot+[color=cBrown,  mark=star]     table[x=n, y=H2_przyp,   col sep=comma]{wyniki.csv}; \addlegendentry{H2}
+				\addplot+[color=cPink,   mark=x]        table[x=n, y=H3_przyp,   col sep=comma]{wyniki.csv}; \addlegendentry{H3}
+			\end{loglogaxis}
+		\end{tikzpicture}
+		\caption{Liczba przypisań w funkcji rozmiaru danych.}
+	\end{figure}
+	
+	\paragraph{INS/INSD:} Algorytmy wstawiania wykazują wzrost kwadratowy; \texttt{INSERTION\_SORT\_DOUBLE} ogranicza liczbę ruchów dzięki wstawianiu par, jednak dla rosnącego $n$ i tak przegrywa z metodami $O(n\log n)$.
+	\paragraph{MERGE\_SORT vs MERGE\_SORT3:} Dzielenie na 3 części zmniejsza głębokość rekurencji i może skutkować lepszym wykorzystaniem pamięci podręcznej; w wynikach widać nieznaczne korzyści czasowe dla większych $n$.
+	\paragraph{HEAP:} Kopiec potrójny redukuje wysokość drzewa względem binarnego, ale każde \texttt{heapify} porównuje do trzech dzieci.
+	
+	\section{Wnioski}
+	\begin{itemize}
+		\item Algorytmy $O(n^2)$ (\texttt{INS}, \texttt{INSD}) stają się nieefektywne już dla $n \gtrsim 2000$.
+		\item \texttt{MERGE\_SORT} oraz \texttt{HEAP\_SORT} są złożoności $O(n\log n)$, więc wypadają lepiej od \texttt{INS}, \texttt{INSD}.
+		\item \texttt{MERGE\_SORT3} wypada minimalnie lepiej od zwykłego MERGE'a dla większych $n$, co przypisujemy mniejszej głębokości rekurencji.
+		\item \texttt{HEAP\_SORT\_TERNARY} stosuje płytsze drzewo, dzięki czemu czasy są minimalnie lepsze.
+		\item Dla praktycznych, dużych danych najlepsze są te o złożoności $O(n\log n)$.
+	\end{itemize}
+	
+\end{document}
